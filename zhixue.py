@@ -226,8 +226,8 @@ def getStudentStrScore(account, examID, studentName = "", subjectID = "", classI
 
 
 if __name__ == "__main__":
-    print(getExamListStrByYear("明德麓谷学校", year = 2021, page = 1)) # 获取明德麓谷学校2021级的考试列表. (第一页)
+    print(getExamListStrByYear("明德麓谷学校", year = 2019, page = 1)) # 获取明德麓谷学校2019级的考试列表. (第一页)
     print("\n")
-    print(getExamDataStrByID("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165")) # 获取考试详情. (此考试是 明德麓谷学校2021级的初三全真模拟, 即2021级在校的最后一场考试)
-    print(getStudentStrScore("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165", studentName = "99427569")) # 获取准考证号为 99427569 的学生在 明德麓谷学校2021级初三全真模拟 的考试成绩.
+    print(getExamDataStrByID("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165")) # 获取 初三全真模拟(明德麓谷学校2019级) 考试详情. (此考试是2019级在校的最后一场考试)
+    print(getStudentStrScore("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165", studentName = "99427569")) # 获取准考证号为 99427569 的学生在 初三全真模拟(明德麓谷学校2019级) 的考试成绩.
     input()
