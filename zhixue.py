@@ -15,12 +15,13 @@ accountList = {
 
 
 # 登录 accountList 中的账号, 并将会话信息存至其字典的 session 中. 
-def login(account):
+def login(account, showProgress = False):
     if account not in accountList: # 检查账号是否在 accountList 中.
         raise Exception("账号未找到.")
     username, password, session = accountList[account]["account"], accountList[account]["password"], accountList[account]["session"] # 取出账号, 密码以及会话信息.
 
     # 登录第一部分, 发送登录请求.
+    if showProgress: print("[0/3] 发送登录请求.")
     data = {
         "service": "https://www.zhixue.com:443/ssoservice.jsp",
     }
@@ -34,6 +35,7 @@ def login(account):
     execution = result["data"]["execution"] # 获取临时凭证2.
 
     # 登录第二部分, 发送账号, 密码以及第一部分中获取到的临时凭证.
+    if showProgress: print("[1/3] 发送账号密码.")
     data = {
         "username": username,
         "password": password,
@@ -51,6 +53,7 @@ def login(account):
     st = result["data"]["st"]
 
     # 登录第三部分, 发送登录凭证, 完成登录.
+    if showProgress: print("[2/3] 检查登录状态.")
     data = {
         "ticket": st,
     }
@@ -58,6 +61,7 @@ def login(account):
     result = result.split("\n", 1)[0]
     if result != "success": # 检查登录是否成功.
         raise Exception(result)
+    if showProgress: print("[3/3] 登录成功.")
 
 
 # 通过对应账号的会话进行 requests.get, 获取信息.
@@ -169,7 +173,9 @@ def getExamDataStrByID(account, examID):
     # avgScore = examData["schoolExamArchive"]["avgScore"]
     # maxScore = examData["schoolExamArchive"]["maxScore"]
     classList = examData["classList"]
+    classList = [class_["name"] for class_ in classList]
     subjectList = examData["allSubjectTopicSetList"]
+    subjectList = [subject["subjectName"] for subject in subjectList]
     string += ("学校名称: %s\n" % schoolName)
     string += ("考试名称: %s\n" % examName)
     string += ("考试年级: %s\n" % gradeName)
@@ -178,18 +184,16 @@ def getExamDataStrByID(account, examID):
     string += ("参考人数: %s\n" % studentTakedNum)
     string += "状态: 已完成\n" if isFinal else "状态: 阅卷中, 可能有部分考生成绩未录入\n"
     string += "科目: "
-    for subject in subjectList:
-        string += ("%s, " % subject["subjectName"])
-    string = string[:-2] + "\n"
+    string += ", ".join(subjectList)
+    string = string + "\n"
     string += "班级: "
-    for class_ in classList:
-        string += ("%s, " % class_["name"])
-    string = string[:-2] + "\n"
-    return string
+    string += ", ".join(classList)
+    string = string + "\n"
+    return string, subjectList, classList
 
 
 # 根据 examID 和 考生准考证号 获取学生成绩.
-def getStudentScore(account, examID, studentName = "", subjectID = "", classID = "", start = None, end = None, translate = False):
+def getStudentScore(account, examID, studentName = "", subjectID = "", classID = "", start = None, end = None, translate = False, showProgress = False):
     if not subjectID: # 在智学网中, 获取成绩排序时需传入排序依据科目和排名范围
         subjectID = "score" # 如果调用函数时没有输入范围, 则默认按总分排序.
     # 7. 获取排名第一页的数据. 可以看到order就是排序依据科目的id (总分的id是 'score' ), classId则是排序范围 (每个班级都有随机id, 在之前的函数中已经根据班级名称获取到了id. ) 如果排序范围不填, 就是在全部参考的学生中排序.
@@ -227,8 +231,10 @@ def getStudentScore(account, examID, studentName = "", subjectID = "", classID =
         
         # 8. 接下来就开始循环获取并简化结果了.
         for page in range(1, pageNum+1):
+            if showProgress: print("\r[%d/%d] 正在获取成绩." % (page, pageNum), end = "")
             if (start and end): # 如果要获取的页数不在有用的范围内, 就直接跳过.
                 if page < startPage:
+
                     continue
                 if page > endPage:
                     continue
@@ -336,56 +342,53 @@ def getStudentStrScore(account, examID, studentName = "", subjectID = "", classI
         
 
 # 根据 examID 和 班级名称 和 学科名称 获取排名.
-def getStudentRank(account, examID, subjectName = None, className = None, start = None, end = None):
+def getStudentRank(account, examID, subjectName = None, className = None, start = None, end = None, showProgress = False):
     examData = getExamDataByID(account, examID)["result"] # 获取考试信息. 3. 要获取排名, 首先要先获取考试信息 (里面包含班级和科目列表)
 
     # 4. 考试信息获取到之后, 根据智学网的格式取出信息就可以了 (Python字典的用法相信你肯定了解过)
     isFinal = examData["isFinal"] # 是否阅卷完成.
     classList = examData["classList"] # 班级列表.
     subjectList = examData["allSubjectTopicSetList"] # 科目列表.
+    if isFinal:
+        for subject in subjectList:
+            if subject["subjectName"] == "总分":
+                subject["topicSetId"] = ""
+    classList.append({
+        "name": "全部",
+        "id": ""
+    })
 
     # 5. 获取排名前, 先要检测排名范围(className)和排序方式(subjectName)是否在考试信息里, 不然就获取不到.
     # 检测学科是否存在.
-    if subjectName == "总分":
-        subjectName = None
-    if (not isFinal) and (subjectName is None):
-        errmsg = ("学科未找到. (学科列表: ")
-        for subject in subjectList:
-            errmsg += ("%s, " % subject["subjectName"])
-        errmsg = errmsg[:-2]+")"
+    if subjectName is None:
+        subjectName = "总分"
+    subjectID = "未找到"
+    for subject in subjectList:
+        if subjectName == subject["subjectName"]:
+            subjectID = subject["topicSetId"]
+            break
+    if subjectID == "未找到":
+        errmsg = "学科未找到. (学科列表: "
+        errmsg += (", ".join([subject["subjectName"] for subject in subjectList]))
+        errmsg += ")"
         raise ValueError(errmsg)
-    subjectID = ""
-    if subjectName is not None:
-        subjectID = "未找到"
-        for subject in subjectList:
-            if subjectName == subject["subjectName"]:
-                subjectID = subject["topicSetId"]
-                break
-        if subjectID == "未找到":
-            errmsg = ("学科未找到. (学科列表: ")
-            for subject in subjectList:
-                errmsg += ("%s, " % subject["subjectName"])
-            errmsg = errmsg[:-2]+")"
-            raise ValueError(errmsg)
 
     # 检测班级名称是否存在.
-    if className == "全部":
-        className = None
-    classID = ""
-    if className is not None:
-        for class_ in classList:
-            if className == class_["name"]:
-                classID = class_["id"]
-                break
-        if not classID:
-            errmsg = ("班级名称未找到. (班级列表: ")
-            for class_ in classList:
-                errmsg += ("%s, " % class_["name"])
-            errmsg = errmsg[:-2]+")"
-            raise ValueError(errmsg)
+    if className is None:
+        className = "全部"
+    classID = "未找到"
+    for class_ in classList:
+        if className == class_["name"]:
+            classID = class_["id"]
+            break
+    if classID == "未找到":
+        errmsg = "班级未找到. (班级列表: "
+        errmsg += (", ".join([class_["name"] for class_ in classList]))
+        errmsg += ")"
+        raise ValueError(errmsg)
 
     # 获取数据.
-    result = getStudentScore(account, examID, "", subjectID, classID, start, end, translate = True) # 6. 检验通过后, 再通过这个函数获取分数信息. (重点在这)
+    result = getStudentScore(account, examID, "", subjectID, classID, start, end, translate = True, showProgress = showProgress) # 6. 检验通过后, 再通过这个函数获取分数信息. (重点在这)
     if not result["studentList"]:
         raise Exception("未查询到结果.")
     # 信息获取到了, 接着和考试信息一起返回给把字典信息转文字的函数
@@ -394,8 +397,8 @@ def getStudentRank(account, examID, subjectName = None, className = None, start 
 
 # 根据 examID 和 班级名称 和 学科名称 获取排名并转换成文字.  hi 这里是生成排名文字信息的, 下方的终端能看到吗..? 能
 # 我讲解一下获取过程..? 嗯
-def getStudentStrRank(account, examID, subjectName = None, className = None, start = None, end = None):
-    result = getStudentRank(account, examID, subjectName, className, start, end) # 2. 然后使用这个函数获取字典格式的信息. 接下来看看这个函数是怎样获取信息的.
+def getStudentStrRank(account, examID, subjectName = None, className = None, start = None, end = None, showProgress = False):
+    result = getStudentRank(account, examID, subjectName, className, start, end, showProgress) # 2. 然后使用这个函数获取字典格式的信息. 接下来看看这个函数是怎样获取信息的.
     # 可以看看信息格式是怎样的
     # print(json.dumps(result["rank"], ensure_ascii = False, indent = 4)) # 这是将字典输出得更好看的方法. (ensure_ascii = False表示保留中文字符, indent表示缩进格式) ...控制台好像显示不下了, 少输出一点看看. 
     # 信息是这样的, 首先是科目信息. 然后也有班级信息 有考试名称
@@ -431,7 +434,10 @@ def getStudentStrRank(account, examID, subjectName = None, className = None, sta
         if start+index != student["studentIndex"]:
             raise Exception("排名数据核对错误.")
         # 最后在这里拼接上排名数据就行了. 因为我技术水平还不高, 所以还没找到同分情况下将排名设为相同的方法
-        string += ("%s. %s, %s\n" % (student["studentIndex"], student["studentName"], student["score"][subjectName]["分数"]))
+        if className == "全部":
+            string += ("%s. %s %s, %s\n" % (student["studentIndex"], student["className"], student["studentName"], student["score"][subjectName]["分数"]))
+        else:
+            string += ("%s. %s, %s\n" % (student["studentIndex"], student["studentName"], student["score"][subjectName]["分数"]))
     return string
 
 
@@ -440,7 +446,7 @@ if __name__ == "__main__":
     print("\n")
     print(getExamListStrByGrade("明德麓谷学校", grade = "初三", page = 1)) # 获取明德麓谷学校初三的考试列表.
     print("\n")
-    print(getExamDataStrByID("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165")) # 获取 初三全真模拟(明德麓谷学校2019级) 考试详情. (此考试是2019级在校的最后一场考试)
+    print(getExamDataStrByID("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165")[0]) # 获取 初三全真模拟(明德麓谷学校2019级) 考试详情. (此考试是2019级在校的最后一场考试)
     print(getStudentStrScore("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165", studentName = "99427569")) # 获取准考证号为 99427569 的学生在 初三全真模拟(明德麓谷学校2019级) 的考试成绩.
 
     # 使用函数的方法在这里, 可以看到传入了排名排序的范围(className)和排序的方式(subjectName)
@@ -452,3 +458,19 @@ if __name__ == "__main__":
     print(getStudentStrRank("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165", subjectName = "总分", className = "九年级1907", start = 2, end = 10)) # 获取 九年级1907班范围内 初三全真模拟(明德麓谷学校2019级) 的考试成绩第2~10名.
     print(getStudentStrRank("明德麓谷学校", "0c116fc3-117c-462c-95be-a5db13ca7165", subjectName = "数学", className = "九年级1907", start = 10, end = 15)) # 获取 九年级1907班范围内 按数学排序 初三全真模拟(明德麓谷学校2019级) 的考试成绩第10~15名.
     input() # 最后控制台的效果应该还算可以 那.. 就接上QQ机器人试试..? 嗯
+    # 8797fe68-2375-4872-b6a8-5a4f6c729634
+
+    # https://www.zhixue.com/api-union/customized/downloadTask/userAchievementMarkingExport?&examId=65bb218d-dea5-4d10-b560-ce64d7f34dd1
+
+    # https://www.zhixue.com/api-teacher/api/president/getExcelDownLoadTaskInfo?examId=2be5e24a-512d-4593-b8b9-c532553e0937&lastExamId=30e59c28-7282-4049-9485-efa1fc2abfc9&fileType=school_score_student&type=normal&version=V3&t=1660664227557
+    # https://www.zhixue.com/api-teacher/api/president/getExcelDownLoadTaskInfo?examId=91b4249a-8150-4909-b929-d82819ba9d9f&fileType=school_score_student&type=normal&version=V3&t=1660664227557
+
+    # https://www.zhixue.com/api-teacher/class/downloadFile?url=oss_/7b4bfeb8-2b02-49b5-af61-6a0e46cee2a8_20220816.zip&fileName=
+
+    # https://www.zhixue.com/api-teacher/api/president/getExcelDownLoadTaskInfo?examId=65bb218d-dea5-4d10-b560-ce64d7f34dd2&fileType=school_score_student&type=normal&version=V3
+
+    # https://www.zhixue.com/api-union/customized/downloadTask/userAchievementMarkingExport?&examId=65bb218d-dea5-4d10-b560-ce64d7f34dd1
+
+    # https://www.zhixue.com/webexam/mmG3xH0zd/#/markingtools/markingtools/main/?hideCommonHead=true&hideCommonFoot=true&examId=de74c714-6cc9-4d50-ba5c-03971d5f9bc3
+
+    # https://www.zhixue.com/htm-freshreport/#/singleExamSetting/dealReport?schoolId=2300000001000049726&examId=0c116fc3-117c-462c-95be-a5db13ca7165&hideCommonHead=true
